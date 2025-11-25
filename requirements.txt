@@ -1,0 +1,7 @@
+fastapi[standard]
+langchain
+langchain-openai
+langchain-community
+sqlalchemy
+psycopg2-binary
+python-dotenv
