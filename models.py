@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from langchain_ollama import OllamaLLM
 from langchain_community.utilities import SQLDatabase
 from langchain_classic.chains.sql_database.query import create_sql_query_chain
-from database import DATABASE_URL
+from database import DATABASE_URL, DATABASE_SQLITE_URL
 from langchain_core.prompts.few_shot import FewShotPromptTemplate
 from langchain_core.prompts.prompt import PromptTemplate
 
@@ -59,9 +59,9 @@ def get_llm(model: str):
 class QueryRequest(BaseModel):
     question: str
 
-def generate_sql(question: str, db_path: str) -> str:    
+def generate_sql(question: str, db_uri: str) -> tuple[str, str]:    
     llm = get_llm("Ollama")
-    db = SQLDatabase.from_uri(DATABASE_URL)
+    db = SQLDatabase.from_uri(db_uri)
 
     chain = create_sql_query_chain(
     llm=llm,
