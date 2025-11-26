@@ -30,7 +30,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
         from evaluation.benchmark import run_spider_benchmark
         metrics = run_spider_benchmark()
-        print(metrics)
+        print(f"Total: {metrics['total']}, Success: {metrics['success']}")
     # Ollama 실행용
     else:
         import uvicorn

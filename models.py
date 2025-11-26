@@ -1,8 +1,7 @@
-from fastapi import FastAPI, HTTPException
 from langchain_ollama import OllamaLLM
 from langchain_community.utilities import SQLDatabase
 from langchain_classic.chains.sql_database.query import create_sql_query_chain
-from database import DATABASE_URL, DATABASE_SQLITE_URL
+from database import DATABASE_URL
 from langchain_core.prompts.few_shot import FewShotPromptTemplate
 from langchain_core.prompts.prompt import PromptTemplate
 
@@ -11,6 +10,7 @@ import os
 import re
 
 top_k = 5
+K = 5
 
 # 향후 few shot을 위한 examples 는 분리
 examples = [
@@ -33,7 +33,7 @@ psql_prompt = PromptTemplate(
     template = "Question: {input}\nSQL:{query}"
 )
 
-fshot_prompt = FewShotPromptTemplate(
+fshot_prompt_limit = FewShotPromptTemplate(
     examples=examples,
     example_prompt=psql_prompt,
     prefix="""Given an input quesiton, create a syntatically correct PostgreSQL query.
@@ -42,6 +42,21 @@ Critical Rules:
 2. Do NOT wrap in '''sql''' blocks
 3. Add "LIMIT {top_k}" at the end unless COUNT/SUM/AVG is used
 4. Only use columns from: {table_info}
+Examples:""",
+    suffix="Question:{input}\nSQL:",
+    input_variables=["input","top_k","table_info"]
+)
+
+# 벤치마크 프롬프트 - top_k 미사용 
+fshot_prompt_nolimit = FewShotPromptTemplate(
+    examples=examples,
+    example_prompt=psql_prompt,
+    prefix="""Given an input quesiton, create a syntatically correct PostgreSQL query.
+Critical Rules:
+1. Return ONLY the sql auery, no explanations, no other lines.
+2. Do NOT wrap in '''sql''' blocks
+3. Only use columns from: {table_info}
+(top_k : {top_k} for reference only, do not add LIMIT unless question specifies)
 Examples:""",
     suffix="Question:{input}\nSQL:",
     input_variables=["input","top_k","table_info"]
@@ -59,27 +74,40 @@ def get_llm(model: str):
 class QueryRequest(BaseModel):
     question: str
 
-def generate_sql(question: str, db_uri: str) -> tuple[str, str]:    
+def generate_sql(question: str, db_uri: str, use_limit: bool = True) -> tuple[str, str]:    
     llm = get_llm("Ollama")
     db = SQLDatabase.from_uri(db_uri)
 
     chain = create_sql_query_chain(
     llm=llm,
     db=db,
-    k=top_k,
-    prompt=fshot_prompt
+    k=K,
+    prompt=fshot_prompt_limit if use_limit else fshot_prompt_nolimit
     )
+
+    # try:
+    #     response = chain.invoke({"question": question})
+    #     print(f"Response received: {response}...")
+    #     sql = extract_sql(response.strip())
+    # except TypeError as e:
+    #     print(f" *** TypeError during Invoke - no sql generated")
 
     response = chain.invoke({"question": question})
     sql = extract_sql(response.strip())
 
-    result = db.run(sql)
+    result = db.run(sql)    
+
     return sql, result
 
 # SQL 블록 제거
 def extract_sql(text: str) -> str:
     match = re.search(r'```sql\s*(.*?)\s*```', text, re.DOTALL)
     if match:
-        return match.group(1).strip()
+        sql = match.group(1).strip()
+    else:
+        sql = text.strip()
     
-    return text.strip()
+    if ';' in sql:
+        sql = sql.split(';')[0].strip()
+    
+    return sql

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from models import generate_sql
 
-spider_db_dir_path = '/home/sykwon/spider/database'
+spider_db_dir_path = Path('/home/sykwon/spider/database')
 
 def run_spider_benchmark(spider_dir: str = "../spider"):
     spider_path = Path(spider_dir)
@@ -19,9 +19,6 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     with open(dev_json_path, "r") as f:
         dev_data = json.load(f)
 
-    with open(tables_json_path, "r") as f:
-        tables_data = json.load(f)
-
     predictions = []
     results = []
     total = len(dev_data)
@@ -29,7 +26,7 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     print(f"Starting Spider benchmark on {total} examples .... ")
 
     for idx, example in enumerate(dev_data, 1):
-        question = example["quesiton"]
+        question = example["question"]
         db_id = example["db_id"]
         gold_sql = example["query"]
         db_path = spider_db_dir_path / db_id / f"{db_id}.sqlite"
@@ -37,9 +34,12 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
         if not db_path:
             print(f"Warning: DB db_id = {db_id} not found")
             continue
+        
+        print(f"Trying to access: {db_path}")
+        print(f"File exists: {db_path.exists()}")
 
         try:
-            predicted_sql, predicted_result = generate_sql(question, f"sqlite://{db_path}")
+            predicted_sql, predicted_result = generate_sql(question, f"sqlite:///{db_path}", use_limit=False)
 
             predictions.append(predicted_sql)
 
@@ -57,11 +57,12 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
         
         except Exception as e:
             print(f"Error on example {idx}: {str(e)}")
-            predictions.append("SELECT * ")
+            print(f"({type(e).__name__})")
+            predictions.append("SELECT * LIMIT 1") # fallback
             results.append({
                 "question": question,
-                "predicted_sql": predicted_sql,
-                "predicted_result": predicted_result,
+                "predicted_sql": None,
+                "predicted_result": None,
                 "gold_sql": gold_sql,
                 "db_id": db_id,
                 "success": False,
@@ -70,6 +71,7 @@ def run_spider_benchmark(spider_dir: str = "../spider"):
     
     output_dir = Path(__file__).parent
     pred_file = output_dir / "pred.sql"
+
     with open(pred_file, "w") as f:
         f.write("\n".join(predictions))
     
