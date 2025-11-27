@@ -16,6 +16,8 @@ number of select columns > 1,
 number of where conditions > 1,
 number of group by clauses > 1,
 number of group by clauses > 1 (no consider col1-col2 math equations etc.)
+
++ based on eval_example, HAVING is not included in comp1
 """
 # with open(train_path, "r") as f:
 #     train_data = json.load(f)
@@ -23,29 +25,23 @@ number of group by clauses > 1 (no consider col1-col2 math equations etc.)
 with open(result_example_path, "r") as f:
     example_data = f.readlines()
 
-# (venv) sykwon@asus-skwon:~/spider/evaluation_examples$ vi eval_result_example.txt
-
-def classify_hardness(query: str) -> str:
+def classify_hardness(query: str):   
     comp1_count = sum(1 for keyword in SQL_comp1 if re.search(rf'\b{keyword}\b', query) and keyword != 'JOIN') 
     comp1_count += len(re.findall(r'\bJOIN\b', query))
-    
-    agg_count = sum(1 for keyword in SQL_aggs if re.search(rf'\b{keyword}\b', query))
+    agg_count = sum(1 for keyword in SQL_aggs if re.search(rf'\b{keyword}\b', query, re.IGNORECASE))
     where_match = re.search(r'WHERE\s+(.+?)(?=\s+GROUP BY|\s+ORDER BY|\s+LIMIT|$)', query)
     where_count = 0
 
     subquery_count = query.count('(SELECT')
     subquery_removed = re.sub(r'\(SELECT.*?\)', '', query, flags=re.DOTALL)
     comp2_count = sum(1 for keyword in SQL_comp2 if re.search(rf'\b{keyword}\b', subquery_removed))
-    
+
     if subquery_count > 0:
         comp2_count += 1
-        
+
     if where_match:
         where_part = where_match.group(1)
         where_count = 1 + len(re.findall(r'\b(?:AND|OR)\b', where_part))
-        where_len = len(re.findall(r'\b(?:AND|OR)\b', where_match.group(1)))
-        print(f"WHERE part: '{where_match.group(1)}'")
-        print(f"AND count: {where_len}")
     groupby_match = re.search(r'GROUP BY\s+(.+?)(?=\s+(?:HAVING|ORDER BY|LIMIT|$))', query)
     col_match = re.search(r'SELECT\s+(.*?)\s+FROM', query)
 
@@ -66,18 +62,19 @@ def classify_hardness(query: str) -> str:
         num_groupby > 1
     ])
 
-    print(f"comp1: {comp1_count}, comp2: {comp2_count}, others: {others_count}")
-
+    counts = {"comp1_count": comp1_count, "comp2_count": comp2_count,
+              "others": others_count, "num_cols": num_cols, "agg_count": agg_count,
+              "where_count": where_count, "num_groupby": num_groupby}
     # easy: 0 - 1 from comp1, none from comp2, no condition from others satisfied
     if comp1_count < 2 and comp2_count == 0 and others_count == 0:
-        return "easy"
+        return "easy", counts
     
     # medium: Others < 3, comp1 < 2 , 0 in comp2,
     # OR
     # comp1 = 2, Others < 2 , and 0 from comp2
     if ((others_count < 3 and comp1_count < 2 and comp2_count == 0)
         or (others_count < 2 and comp1_count == 2 and comp2_count == 0)):
-        return "medium"
+        return "medium", counts
 
     # hard: > 2 others, comp1 < 3 , 0 in comp2
     # OR
@@ -86,10 +83,12 @@ def classify_hardness(query: str) -> str:
     # comp1 < 2, 0 in others, comp2 = 1
     if ((others_count > 2 and comp1_count < 3 and comp2_count == 0)
         or (2 < comp1_count <= 3 and others_count < 3 and comp2_count == 0)
-        or (comp1_count < 2 and others_count == 0 and comp2_count == 1)):
-        return "hard"
+        or (comp1_count < 2 and others_count == 0 and comp2_count == 1)
+        #or (comp1_count == 2 and others_count == 0 and comp2_count == 1 )
+        ):
+        return "hard", counts
 
-    return "extra"
+    return "extra", counts
 
 
 wrong_sql = []
@@ -104,12 +103,12 @@ for idx, data in enumerate(example_data, 1):
         continue
     truth_hardness = parts[0]
     query = line[1].strip()
-    pred_hardness = classify_hardness(query)
+    pred_hardness, counts = classify_hardness(query)
     if truth_hardness != pred_hardness:
         wrong += 1
         total += 1
         dg = f'Predicted: {pred_hardness}, Answer: {truth_hardness} - {line[1]}'
-        print(dg)
+        wrong_sql.append(str(counts))
         wrong_sql.append(dg)
 
     else:
