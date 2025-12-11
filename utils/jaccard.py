@@ -1,7 +1,5 @@
 import json
-import pickle
 from pathlib import Path
-import numpy as np
 
 PRJ_ROOT = Path(__file__).parent.parent
 DATA_DIR = PRJ_ROOT / "data"
@@ -29,6 +27,12 @@ def load_train_questions():
     
 
 def retrieve_jaccard_examples(question, k=5):    
+    """
+    Jaccard 유사도 기반 k개의 예제 반환
+    
+    :param question: input string
+    :param k: 예제 개수
+    """
     if len(train_questions) == 0:
         load_train_questions()
     

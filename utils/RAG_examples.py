@@ -17,13 +17,6 @@ train_questions = []
 train_sqls = []
 faiss_index = None
 
-LEVEL_RATIO = {
-    "easy": 0.3,
-    "medium": 0.3,
-    "hard": 0.2,
-    "extra": 0.2
-}
-
 def load_index():
     global embedder, embeddings, train_questions, train_sqls, faiss_index
 

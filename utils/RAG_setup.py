@@ -1,6 +1,5 @@
 import json
 import pickle
-from pathlib import Path
 from paths import DATA_DIR, INDEX_DIR, SPIDER_DIR
 from sentence_transformers import SentenceTransformer
 import faiss
