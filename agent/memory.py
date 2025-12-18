@@ -19,7 +19,7 @@ class AgentMemory:
     qeustion: str
 
     # Database information
-    schema: Optional[Dict[str, Any]] = None
+    schema: Optional[str] = None
     schema_summary: Optional[str] = None
     
     # Few-shot examples
@@ -39,7 +39,6 @@ class AgentMemory:
     successful_results: List[Dict[str, Any]] = field(default_factory=list)
     
     # Metadata
-    iteration_count: int = 0
     start_time: datetime = field(default_factory=datetime.now)
 
     def has_schema(self):
@@ -68,7 +67,6 @@ class AgentMemory:
         )
 
         self.sql_attempts.append(attempt)
-        self.iteration_count += 1
 
         if error:
             self.last_error = error

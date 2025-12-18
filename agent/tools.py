@@ -30,7 +30,7 @@ class AgentTools:
             "summary": summary_schema
         }
     
-    def search_similar_examples(self, question: str, k: int = 3):
+    def search_similar_examples(self, question: str, k: int = 3) -> List[Dict[str, Any]]:
         from utils.jaccard import retrieve_jaccard_examples
         return retrieve_jaccard_examples(question, k)
     
@@ -55,3 +55,41 @@ class AgentTools:
                 "error_type": error_type.value,
                 "success": False
             }
+
+    def validate_sql_syntax(self, sql: str) -> Dict[str, Any]:
+        """
+        Validate SQL syntax without executing.
+        
+        Args:
+            sql: SQL query string
+            
+        Returns:
+            Dict with "valid" (bool) and "errors" (list) keys
+        """
+        errors = []
+        
+        # Basic syntax checks
+        sql_lower = sql.lower().strip()
+        
+        if not sql_lower.startswith("select"):
+            errors.append("Query must start with SELECT")
+        
+        if "from" not in sql_lower:
+            errors.append("Query must contain FROM clause")
+        
+        # Check for common syntax issues
+        if sql_lower.count("(") != sql_lower.count(")"):
+            errors.append("Unmatched parentheses")
+        
+        if sql_lower.count("'") % 2 != 0:
+            errors.append("Unmatched quotes")
+        
+        # Check for dangerous operations (optional safety check)
+        dangerous_keywords = ["drop", "delete", "truncate", "update"]
+        if any(kw in sql_lower for kw in dangerous_keywords):
+            errors.append("Query contains potentially dangerous operations")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors
+        }

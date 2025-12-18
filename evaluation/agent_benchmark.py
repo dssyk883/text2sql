@@ -1,22 +1,28 @@
 import json
 from pathlib import Path
-from models import generate_sql, run_db
-from claude_integration import generate_sql_claude
-from utils.classifier import classify_level
-from utils.RAG_setup import summarize_schema, get_schema_safe
-import time
 import random
+import time
+
+from agent import NL2SQLAgent, AgentConfig
 
 text2sql_path = Path(__file__).parent.parent
 spider_db_dir_path = text2sql_path.parent / "spider" / "database"
 spider_dir_path = text2sql_path.parent / "spider"
 
+examples_path = spider_dir_path / "evaluation_examples" / "examples"
+dev_json_path = examples_path  / "dev.json"
+tables_json_path = examples_path / "tables.json"
 
-def run_spider_benchmark(args):
-    print(f"example_type: {args.strategy}")
-    examples_path = spider_dir_path / "evaluation_examples" / "examples"
-    dev_json_path = examples_path  / "dev.json"
-    tables_json_path = examples_path / "tables.json"
+
+def run_spider_agent_benchmark(args):
+    agent = NL2SQLAgent(
+        model_type = args.model,
+        k = args.k_examples,
+        config = AgentConfig(
+            max_iterations=args.max_iterations,
+            max_refinements=args.max_refinements
+        )
+    )
 
     if not dev_json_path.exists():
         raise FileNotFoundError(f"Spider dev.json not found at {dev_json_path}")
@@ -25,7 +31,7 @@ def run_spider_benchmark(args):
     
     with open(dev_json_path, "r") as f:
         dev_data = json.load(f)
-
+    
     predictions = []
     results = []
 
@@ -33,7 +39,7 @@ def run_spider_benchmark(args):
     start_time = time.time()
     random.seed(88)
     batch = random.sample(dev_data, args.batch)
-    # RELOAD_COUNT = 108
+
     for idx, example in enumerate(batch, 1):
         question = example["question"]
         db_id = example["db_id"]
@@ -43,54 +49,27 @@ def run_spider_benchmark(args):
         if not db_path.exists():
             print(f"Warning: DB db_id = {db_id} not found")
             continue
-        schema = get_schema_safe(db_id)
-        summarized_schema = summarize_schema(schema)
-        if args.model == 'sonnet':
-            predicted_sql = generate_sql_claude(question,
-                                                schema,
-                                                args)
-        else:# Generate SQL 
-            predicted_sql = generate_sql(question,
-                                     schema,
-                                     args,
-                                     f"sqlite:///{db_path}")
-        
-        # print(f"[{idx}] Generated: {predicted_sql}")
-        level, counts = classify_level(gold_sql)
-        # print(f"*** predicted sql: {predicted_sql}")
-        # print(f"[{idx}] Running DB...")
-        try:
-            predicted_result = run_db(predicted_sql, f"sqlite:///{db_path}")
-            # print(f"[{idx}] Result: {predicted_result}")
 
-            predictions.append(predicted_sql)
-
-            results.append({
-                "question": question,
-                "schema": summarized_schema,
-                "predicted_sql": predicted_sql,
-                "predicted_result": predicted_result,
-                "gold_sql": gold_sql,
-                "level": level,
-                "db_id": db_id,
-                "success": True
-            })
+        result = agent.run(question, db_id, db_path)
+        if result['success']:
+            predictions.append(result['sql'])
+        else:
+            predictions.append(', '.join(result['sql']))
         
-        except Exception as e:
-            # print(f"Error on example {idx}: {str(e)}")
-            # print(f"Error on {idx}: ({type(e).__name__})")
-            predictions.append(predicted_sql) # fallback
-            results.append({
-                "question": question,
-                "schema": summarized_schema,
-                "predicted_sql": predicted_sql,
-                "predicted_result": None,
-                "gold_sql": gold_sql,
-                "level": None,
-                "db_id": db_id,
-                "success": False,
-                "error": str(e)
-            })
+        results.append({
+            "question": question,
+            "schema": result['schema'],
+            "predicted_sql": predictions[-1],
+            "predicted_result": result.get('result', None),
+            "gold_sql": gold_sql,
+            "db_id": db_id,
+            "iterations": result.get('iterations', 0),
+            "refinements": result.get('refinements', 0),
+            "error": result.get('error', None),
+            "error_type": result.get('error_type', None),
+            "success": result['success'],
+
+        })
 
         print(f"Success: {idx} / {args.batch}")
         if idx % 10 == 0:

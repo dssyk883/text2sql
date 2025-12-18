@@ -31,8 +31,8 @@ class PromptBuilder:
             return self._build_analyze_prompt(memory)
         elif state == AgentState.GATHER_INFO:
             return self._build_gather_info_prompt(memory)
-        elif state == AgentState.GENERATE_SQL:
-            return self._build_generate_sql_prompt(memory)
+        # elif state == AgentState.GENERATE_SQL:
+        #     return self._build_generate_sql_prompt(memory)
         elif state == AgentState.VALIDATE_SQL:
             return self._build_validate_sql_prompt(memory)
         elif state == AgentState.REFINE_SQL:
@@ -112,27 +112,27 @@ Question: {memory.qeustion}
 """
         return prompt.strip()
     
-    def _build_validate_sql_prompt(self, memory: AgentMemory) -> str:
-        """Prompt for SQL validation - not sure if it's used"""
+#     def _build_validate_sql_prompt(self, memory: AgentMemory) -> str:
+#         """Prompt for SQL validation - not sure if it's used"""
         
-        last_sql = memory.get_last_sql()
+#         last_sql = memory.get_last_sql()
         
-        prompt = f"""Review this SQL query for errors.
+#         prompt = f"""Review this SQL query for errors.
 
-Question: {memory.question}
-Generated SQL: {last_sql}
+# Question: {memory.question}
+# Generated SQL: {last_sql}
 
-Check for:
-- Syntax errors
-- Wrong table/column names
-- Logic errors
+# Check for:
+# - Syntax errors
+# - Wrong table/column names
+# - Logic errors
 
-Is this SQL correct? Reply with:
-- "valid" if correct
-- "invalid: [reason]" if there are issues
-"""
+# Is this SQL correct? Reply with:
+# - "valid" if correct
+# - "invalid: [reason]" if there are issues
+# """
         
-        return prompt.strip()
+#         return prompt.strip()
     
     def _build_refine_sql_prompt(self, memory: AgentMemory) -> str:
         """Prompt for SQL refinement after error"""

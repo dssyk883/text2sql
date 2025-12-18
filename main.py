@@ -23,7 +23,7 @@ async def text_to_sql(request: QueryRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Text2SQL Few-Shot Benchmark')
+    parser = argparse.ArgumentParser(description='NL2SQL Few-Shot Benchmark')
     parser.add_argument('-m', '--mode', choices=['benchmark', 'app'],
                         default='benchmark', help='Execution mode')
     parser.add_argument('-s', '--strategy', choices=['random', 'rag', 'ic', 'jacc'],
