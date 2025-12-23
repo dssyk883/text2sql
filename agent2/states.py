@@ -15,7 +15,6 @@ class AgentState(Enum):
 class ActionType(Enum):
     """Available actions the agent can take"""
     GENERATE_SQL = "generate_sql"
-    GET_DB_SCHEMA = "get_db_schema"
     VALIDATE_SQL = "validate_sql"
     EXECUTE_SQL = "execute_sql"
     CHECK_SEMANTIC = "check_semantic"
@@ -24,14 +23,14 @@ class ActionType(Enum):
 
 STATE_ACTIONS = {
     AgentState.SQL_STATE: [
-        ActionType.GET_DB_SCHEMA,
         ActionType.GENERATE_SQL,
         ActionType.FEW_SHOT_SELECT,
         ActionType.VALIDATE_SQL
     ],
     AgentState.POST_EXEC_STATE: [
         ActionType.EXECUTE_SQL,
-        ActionType.CHECK_SEMANTIC
+        ActionType.CHECK_SEMANTIC,
+        ActionType.FEW_SHOT_SELECT,
     ]
 }
 

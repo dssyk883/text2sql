@@ -11,17 +11,6 @@ class AgentWorker:
     def __init__(self, db_id: str = None, db_path: str = None):
         self.db_id = db_id
         self.db_path = db_path
-        self.model = self._load_model()
-
-    def _load_model(self):
-        return self.get_llm("qwen")
-        # if self.model_type == "qwen":
-        #     from models import get_llm
-        #     return get_llm("qwen")
-        
-        # if self.model_type == "sonnet":
-        #     from claude_integration import get_claude_client
-        #     return get_claude_client()
         
     def get_db_schema(self):
         from utils.RAG_setup import summarize_schema, get_schema_safe
@@ -55,28 +44,6 @@ class AgentWorker:
             )
         return examples
     
-    def execute_sql(self, sql: str):
-        from models import run_db
-        try:
-            result = run_db(sql, f"sqlite:///{self.db_path}")
-
-            return {
-                "result": result,
-                "success": True
-            }
-
-        except Exception as e:
-            from agent.states import classify_error
-
-            error_msg = str(e)
-            error_type = classify_error(error_msg)
-
-            return {
-                "error_message": error_msg,
-                "error_type": error_type.value,
-                "success": False
-            }
-
     def validate_sql_syntax(self, sql: str) -> Dict[str, Any]:
         """
         Validate SQL syntax without executing.
