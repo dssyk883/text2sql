@@ -33,6 +33,12 @@ class PromptBuilder:
 {"worker": "generate_sql", "params": {}, "reasoning": "Schema loaded, ready to generate","confidence": 0.9}
     """
 
+    EXAMPLE_SEMANTIC = """
+{"status": "PASS", "confidence": 0.95, "issues": [], "reasoning": "Correct count query"},
+{"status": "PARTIAL", "confidence": 0.6, "issues": ["Missing inactive departments"], "reasoning": "Question says 'all' but SQL filters active only"},
+{"status": "FAIL", "confidence": 0.9, "issues": ["No GROUP BY", "Missing department info"], "reasoning": "Gives overall average, not per department"}
+"""
+
     def __init__(self):
         self._build_tempaltes()
 
@@ -60,9 +66,9 @@ AVAILABLE ACTIONS:
 {available_actions}
 
 Choose ONE action and respond in JSON:
-{{"action": "<name>", "params": {{}}, "reasoning": "<brief reason>", "confidence": "<float between 0-1>"}}
+{{"action": "<name>", "params": {{}}, "reasoning": "<brief reason>", "confidence": 0.0-1.0}}
 
-Examples response:
+Response Examples:
 {example_decision}
 
 Your choice:"""
@@ -79,6 +85,117 @@ Your choice:"""
                 "last_action",
                 "available_actions",
                 "example_decision"
+            ],
+            template=template
+        )
+    
+    def _create_sql_generation_template(self) -> PromptTemplate:
+        template ="""You are a SQLite expert. Learn these natural languages to SQL examples.
+Examples:
+{examples}
+
+Now, given the following information, generate the correct SQL query:
+Schema:
+{schema_summary}
+
+Critical Rules:
+1. If a table/column is not in the schema above, you CANNOT use it
+2. Check spelling carefully (case-sensitive)
+3. Do NOT use common sense - use ONLY what's in the schema
+4. Return ONLY the SQL query
+
+Question: {question}
+"""
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "schema_summary",
+                "examples"
+            ]
+        )
+    
+    def _create_semantic_check_template(self) -> PromptTemplate:
+        template = """Check if SQL results answer the question correctly.
+QUESTION: {question}
+SQL: {sql}
+RESULT: {execution_result}
+SCHEMA: {schema_summary}
+
+Analysis:
+1. Does result structure match question?
+2. Is row count reasonable?
+3. Are values correct type?
+
+Respond in JSON:
+{{"status": "PASS|PARTIAL|FAIL", "issues": ["issue1", "issue2"], "reasoning": "brief explanation", "confidence": 0.0-1.0}}
+
+Response Examples:
+{example_semantic}
+
+Your analysis:
+"""
+
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "sql",
+                "execution_result",
+                "schema_summary",
+                "example_semantic",
+            ]
+        )
+
+    
+    def build_semantic_check_prompt(self, memory:AgentMemory) -> str:
+        sql = memory.get_last_sql()
+        execution_result = memory.get_last_execution_result()
+        schema = memory.schema_summary
+        return f"""You are a semantic validator for NL2SQL systems.
+Your task is to verify if the SQL query and its results correctly answer the user's question.
+
+[User Question]
+{memory.question}
+
+[Generated SQL]
+{sql}
+
+[Query Execution Result]
+{execution_result if execution_result else "Query not executed yet"}
+
+[Database Schema Context]
+{schema}
+
+[Validation Criteria]
+1. Logic Alignment: Does the SQL logic match the question's intent?
+2. Result Relevance: Do the results make sense for the question?
+3. Completeness: Does the query capture all aspects of the question?
+4. Correctness: Are there any logical errors (wrong JOINs, filters, aggregations)?
+
+[Output Format - JSON Only]
+{{
+    "is_valid": true/false,
+    "alignment_score": 0.0-1.0,
+    "issue type": ["issue1", "issue2"],
+    "reasoning": "detailed explanation",
+    "suggested_fix": "what needs to change (if invalid)"
+}}
+
+Examples:
+Question: "How many users registered in 2024?"
+SQL: SELECT COUNT(*) FROM users WHERE YEAR(created_at) = 2024
+Result: 150
+{{"is_valid": true, "alignment_score": 0.95, "issues": null, "reasoning": "Query correctly counts users with 2024 filter", "suggested_fix": null}}
+
+Question: "Show top 5 products by revenue"
+SQL: SELECT product_name FROM products ORDER BY price DESC LIMIT 5
+Result: [product names]
+{{"is_valid": false, "alignment_score": 0.3, "issues": ["Using price instead of revenue", "Missing revenue calculation"], "reasoning": "Query sorts by price, not revenue", "suggested_fix": "Should SUM(order_items.quantity * order_items.price) and JOIN with orders"}}
+
+Now validate the query above.
+"""
+        return PromptTemplate(
+            input_variables=[
+                
             ],
             template=template
         )
