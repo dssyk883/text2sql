@@ -1,5 +1,6 @@
 from typing import List
 from enum import Enum
+from agent2.memory import AgentMemory
 
 class AgentState(Enum):
     """
@@ -81,6 +82,20 @@ STATE_ACTIONS = {
     AgentState.TERMINAL: [] # No actions allowed
 }
 
+CHECKPOINT_PROGRESSION = {
+    Checkpoint.NONE: Checkpoint.SQL_GENERATED,
+    Checkpoint.SQL_GENERATED: Checkpoint.SQL_VALIDATED,
+    Checkpoint.SQL_VALIDATED: Checkpoint.SQL_EXECUTED,
+    Checkpoint.SQL_EXECUTED: Checkpoint.SEMANTIC_VERIFIED,
+}
+
+ACTION_CHECKPOINT_MAP = {
+    ActionType.GENERATE_SQL: Checkpoint.SQL_GENERATED,
+    ActionType.REFINE_SQL: Checkpoint.SQL_GENERATED,
+    ActionType.VALIDATE_SQL: Checkpoint.SQL_VALIDATED,
+    ActionType.EXECUTE_SQL: Checkpoint.SQL_EXECUTED,
+    ActionType.CHECK_SEMANTIC: Checkpoint.SEMANTIC_VERIFIED,
+}
 
 def classify_error(error_msg: str) -> ErrorType:
     error_lower = error_msg.lower()
@@ -113,26 +128,23 @@ def classify_error(error_msg: str) -> ErrorType:
 
 def get_available_actions(
         state: AgentState,
-        has_sql: bool = False,
-        has_validation: bool = False,
-        semantic_result: SemanticCheckResult = None,
-        low_confidence: bool = False,
-        failure_history: List[ErrorType] = None,
+        memory: AgentMemory,
         ) -> List[ActionType]:
     """
     Get available actions based on current state and context.
 
     Args:
         state: Current agent state
-        has_sql: If SQL has been generated
-        has_validation: if SQL has been validated
-        semantic_result: Result from semantic check
-        low_confidence: if LLM confidence is low
-        failure_history: List of previous failures
+        memory: Agent memory containig context
     Returns:
         List of available actions
     """
     base_actions = STATE_ACTIONS.get(state, [])
+
+    has_sql = memory.sql is not None
+    semantic_result = memory.get_last_semantic_result() # TODO
+    low_confidence = memory.get_last_confidence() < 0.5 if memory.get_last_confidence() else False # TODO
+    failure_history = memory.get_last_error()['error_type'] #TODO
 
     if state == AgentState.PLANNING:
         return base_actions
@@ -199,3 +211,33 @@ def get_next_state(
             return AgentState.SQL_EXECUTION # shouldn't fall in this line
         
     return current_state # By default stay in the current state        
+
+def update_checkpoint(
+    current_checkpoint: Checkpoint,
+    action: ActionType,
+    success: bool
+) -> Checkpoint:
+    """
+    Update checkpoint based on successful action completion
+
+    Args:
+        current_checkpoint: Current checkpoint
+        action: Action that was performed
+        success: If action succeeded
+
+    Returns:
+        New checkpoint (advacned if action succeeded, same otherwise)
+    """
+    if not success:
+        if action == ActionType.EXECUTE_SQL:
+            return Checkpoint.SQL_GENERATED
+        if action == ActionType.CHECK_SEMANTIC:
+            return Checkpoint.SQL_GENERATED
+        if action == ActionType.VALIDATE_SQL:
+            return Checkpoint.NONE
+        return current_checkpoint
+    
+    target = ACTION_CHECKPOINT_MAP.get(action)
+    if target:
+        return target
+    return current_checkpoint
