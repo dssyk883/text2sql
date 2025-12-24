@@ -7,22 +7,84 @@ from typing import Dict, Optional, List
 from agent2.states import AgentState, ActionType, get_available_workers
 from agent2.memory import AgentMemory, SQLAttempt
 from langchain_core.prompts.prompt import PromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate
 
 class PromptBuilder:
-    EXAMPLE_OUTPUT = """
-{"worker": "get_db_schema", "params": {}, "reasoning": "Need schema first", "confidence": 0.95}
-{"worker": "few_shot_select", "params": {"strategy": "jaccard", "k": 5}, "reasoning": "Similar questions found", "confidence": 0.8}
-{"worker": "generate_sql", "params": {}, "reasoning": "Schema loaded, ready to generate", "confidence": 0.9}
-    """
+
     ACTION_DESCRIPTIONS = {
-            ActionType.VALIDATE_SQL: "Validate SQL syntax",
+            ActionType.ANALYZE_QUESTION: "Analyze the given question",
             ActionType.GENERATE_SQL: "Generate SQL query",
+            ActionType.VALIDATE_SQL: "Validate SQL syntax",
+            ActionType.REFINE_SQL: "Refine SQL query",
             ActionType.CHECK_SEMANTIC: "Compare the question and SQL query",
             ActionType.EXECUTE_SQL: "Execute the generated SQL query",
             ActionType.FEW_SHOT_SELECT: "Select a few-shot example strategy",
         }
+    
+    DECISION_INSTRUCTIONS = """
+- Choose exactly ONE next worker
+- For Few-Shot Selector, specify strategy (Random/Intent/Jaccard) and k(1-5)
+- Respond ONLY in valid JSON
+- Do NOT include explanations outside JSON
+"""
+
+    EXAMPLE_DECISION = """
+{"worker": "few_shot_select", "params": {"strategy": "jaccard", "k": 5}, "reasoning": "Similar questions found", "confidence": 0.8},
+{"worker": "generate_sql", "params": {}, "reasoning": "Schema loaded, ready to generate","confidence": 0.9}
+    """
+
+    def __init__(self):
+        self._build_tempaltes()
+
+    def _build_templates(self):
+        """Initialize prompt template"""
+        self.templates = {
+            "decision": self._create_decision_template(),
+            "sql_generation": self._create_sql_generation_template(),
+            "semantic_check": self._create_semantic_check_template(),
+        }
+
+    def _create_decision_template(self) -> PromptTemplate:
+        template = """You are deciding the next action for SQL generation.
+QUESTION: {question}
+DB SCHEMA: {schema_summary}
+STATE: {current_state}
+PROGRESS: {current_checkpoint}
+
+CURRENT SQL: {current_sql}
+LAST RESULT: {execution_result}
+LAST ERROR: {last_error}
+LAST ACTION: {last_action}
+
+AVAILABLE ACTIONS:
+{available_actions}
+
+Choose ONE action and respond in JSON:
+{{"action": "<name>", "params": {{}}, "reasoning": "<brief reason>", "confidence": "<float between 0-1>"}}
+
+Examples response:
+{example_decision}
+
+Your choice:"""
+
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "current_state",
+                "current_checkpoint", 
+                "current_sql",
+                "execution_result",
+                "last_error",
+                "schema_summary",
+                "last_action",
+                "available_actions",
+                "example_decision"
+            ],
+            template=template
+        )
 
     def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
+        """Build the complete decision prompt"""
         sql = memory.get_last_sql()
         prev_ex_result = memory.get_last_execution_result()
         schema_summary = memory.schema_summary
