@@ -12,13 +12,12 @@ from langchain_core.prompts.chat import ChatPromptTemplate
 class PromptBuilder:
 
     ACTION_DESCRIPTIONS = {
-            ActionType.ANALYZE_QUESTION: "Analyze the given question",
+            ActionType.FEW_SHOT_SELECT: "Select a few-shot example strategy",
             ActionType.GENERATE_SQL: "Generate SQL query",
             ActionType.VALIDATE_SQL: "Validate SQL syntax",
             ActionType.REFINE_SQL: "Refine SQL query",
-            ActionType.CHECK_SEMANTIC: "Compare the question and SQL query",
             ActionType.EXECUTE_SQL: "Execute the generated SQL query",
-            ActionType.FEW_SHOT_SELECT: "Select a few-shot example strategy",
+            ActionType.CHECK_SEMANTIC: "Compare the question and SQL query",            
         }
     
     DECISION_INSTRUCTIONS = """
@@ -29,8 +28,8 @@ class PromptBuilder:
 """
 
     EXAMPLE_DECISION = """
-{"worker": "few_shot_select", "params": {"strategy": "jaccard", "k": 5}, "reasoning": "Similar questions found", "confidence": 0.8},
-{"worker": "generate_sql", "params": {}, "reasoning": "Schema loaded, ready to generate","confidence": 0.9}
+{"worker": "few_shot_select", "params": {"strategy": "jaccard", "k": 5}, "reasoning": "Question has specific keywords, Jaccard will match terms", "confidence": 0.8},
+{"worker": "generate_sql", "params": {}, "reasoning": "SQL Examples loaded, ready to generate","confidence": 0.9}
     """
 
     EXAMPLE_SEMANTIC = """
@@ -40,7 +39,7 @@ class PromptBuilder:
 """
 
     def __init__(self):
-        self._build_tempaltes()
+        self._build_templates()
 
     def _build_templates(self):
         """Initialize prompt template"""
@@ -54,6 +53,7 @@ class PromptBuilder:
         template = """You are deciding the next action for SQL generation.
 QUESTION: {question}
 DB SCHEMA: {schema_summary}
+FEW-SHOT EXAMPLES: {examples_status}
 STATE: {current_state}
 PROGRESS: {current_checkpoint}
 
@@ -76,12 +76,13 @@ Your choice:"""
         return PromptTemplate(
             input_variables=[
                 "question",
+                "schema_summary",
+                "examples_status",
                 "current_state",
                 "current_checkpoint", 
                 "current_sql",
                 "execution_result",
-                "last_error",
-                "schema_summary",
+                "last_error",                
                 "last_action",
                 "available_actions",
                 "example_decision"
@@ -150,21 +151,26 @@ Your analysis:
     def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
         """Build the complete decision prompt"""
         sql = memory.get_last_sql()
+        if not memory.examples or len(memory.examples) == 0:
+            examples_status = "No examples loaded"
+        else:
+            examples_status = f"{len(memory.examples)} examples loaded"
         last_execution_result = memory.get_last_execution_result()
         last_error = memory.get_last_error()
         last_action = self._format_action(memory.get_last_action())
-        available_actions = self._format_workers(get_available_actions(
+        available_actions = self._format_available_actions(get_available_actions(
             state=state,
             memory=memory,
         ))
         return self.templates['decision'].format(
             question=memory.question,
+            schema_summary=memory.schema_summary,
+            examples_status=examples_status,
             current_state=state.value,
             current_checkpoint=memory.checkpoint.value,
             current_sql=sql,
             execution_result=last_execution_result,
-            last_error=last_error,
-            schema_summary=memory.schema_summary,
+            last_error=last_error,            
             last_action=last_action,
             available_actions=available_actions,
             example_decision=self.EXAMPLE_DECISION
@@ -178,7 +184,7 @@ Your analysis:
             examples=examples
         )
     
-    def build_schema_check_prompt(self, memory: AgentMemory) -> str:
+    def build_semantic_check_prompt(self, memory: AgentMemory) -> str:
         result = memory.get_last_execution_result()
         return self.templates['semantic_check'].format(
             question=memory.question,
@@ -188,7 +194,7 @@ Your analysis:
             example_semantic=self.EXAMPLE_SEMANTIC
         )
     
-    def _format_workers(self, actions: List[ActionType]) -> str:
+    def _format_available_actions(self, actions: List[ActionType]) -> str:
         formatted = []
         for i, action in enumerate(actions):
             description = self.ACTION_DESCRIPTIONS.get(action, "No description")
@@ -224,17 +230,10 @@ Your analysis:
 
         return "\n\n".join(formatted)
 
-    def _format_action(self, actions: Optional[List[Dict[str, str]]]) -> str:
+    def _format_action(self, action: Optional[Dict[str, str]]) -> str:
         """
-        Format Action history for LLM context
+        Format last action
         """
-        if not actions:
+        if not action:
             return "No previous actions"
-        
-        formatted = []
-        for idx, action in enumerate(actions, 1):
-            parts = [f"Action #{idx}", f"Action: {action['action'].val}",
-                     f"State: {action['state'].val}", f"Result: {action['result']}"]
-            formatted.append("\n".join(parts))
-        
-        return "\n\n".join(formatted)
+        return f"State: {action['state'].value}, Action: {action['action'].value} ({'Success' if action['success'] else 'Failed'}), Iteration: {action['iteration']}"

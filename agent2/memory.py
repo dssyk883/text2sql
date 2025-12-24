@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
-from agent2.states import AgentState, ActionType
+from agent2.states import AgentState, ActionType, Checkpoint
 
 @dataclass
 class SQLAttempt:
@@ -21,6 +21,9 @@ class AgentMemory:
     # Database information
     schema: Optional[str] = None
     schema_summary: Optional[str] = None
+
+    # Current checkpoint
+    checkpoint: Checkpoint = Checkpoint.NONE
     
     # Few-shot examples
     examples: List[Dict[str, str]] = field(default_factory=list)
@@ -36,15 +39,18 @@ class AgentMemory:
 
     # Action history
     action_history: List[Dict[str, Any]] = field(default_factory=list)
+    # state: AgentState, action: ActionType, success: bool, iteration: int
     
     # Error tracking
     last_error: Optional[Dict[str, Any]] = None
     error_history: List[Dict[str, Any]] = field(default_factory=list)
-    
+    # error_message: error message, error_type: error type
+
     analysis: Optional[Dict[str, Any]] = None
     
     # Execution results
     successful_results: List[Dict[str, Any]] = field(default_factory=list)
+    # SQLAttempt with success = True
     
     # Metadata
     start_time: datetime = field(default_factory=datetime.now)
@@ -53,9 +59,10 @@ class AgentMemory:
             self,
             action: ActionType,
             state: AgentState,
-            result: Any
+            success: bool,
+            iteration: int
     ):
-        self.action_history.append({'action': action, 'state': state, 'result': result})
+        self.action_history.append({'action': action, 'state': state, 'success': success, 'iteration': iteration})
 
     def add_sql_attempt(
         self,
@@ -92,7 +99,7 @@ class AgentMemory:
             return self.sql_attempts[-1].sql
         return None
        
-    def get_last_action(self) -> Optional[str]: # the most recent action
+    def get_last_action(self) -> Optional[Dict[str, Any]]: # the most recent action
         if self.action_history:
             return self.action_history[-1]
         return None

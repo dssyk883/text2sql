@@ -23,7 +23,6 @@ class TerminalStatus(Enum):
 class ActionType(Enum):
     """Available actions the agent can take"""
     # Planning actions
-    ANALYZE_QUESTION = "analyze_question" # Analyze question complexity
     FEW_SHOT_SELECT = "few_shot_select" # Select few-shot strategy and k, and generate examples
 
     # SQL Generation actions
@@ -64,7 +63,6 @@ class ErrorType(Enum):
 
 STATE_ACTIONS = {
     AgentState.PLANNING: [
-        ActionType.ANALYZE_QUESTION,
         ActionType.FEW_SHOT_SELECT,
     ],
     AgentState.SQL_GENERATION: [
@@ -114,7 +112,6 @@ def classify_error(error_msg: str) -> ErrorType:
 def get_available_actions(
         state: AgentState,
         has_sql: bool = False,
-        has_validation: bool = False,
         semantic_result: SemanticCheckResult = None,
         low_confidence: bool = False,
         failure_history: List[ErrorType] = None,
