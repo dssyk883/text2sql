@@ -1,12 +1,12 @@
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
+from agent2.states import AgentState, ActionType, Checkpoint
 
 @dataclass
 class SQLAttempt:
     sql: str
     timestamp: datetime
-    state: str
     success: bool
     error: Optional[Dict[str, Any]] = None
     result: Optional[Any] = None
@@ -21,45 +21,60 @@ class AgentMemory:
     # Database information
     schema: Optional[str] = None
     schema_summary: Optional[str] = None
+
+    # Current checkpoint
+    checkpoint: Checkpoint = Checkpoint.NONE
     
     # Few-shot examples
     examples: List[Dict[str, str]] = field(default_factory=list)
+    few_shot_history: List[Dict[str, any]] = field(default_factory=list)
+    """
+    startegy,
+    k,
+    trigger # Why LLM chose this strategy
+    """
     
     # SQL generation history
     sql_attempts: List[SQLAttempt] = field(default_factory=list)
+
+    # Action history
+    action_history: List[Dict[str, Any]] = field(default_factory=list)
+    # state: AgentState, action: ActionType, success: bool, iteration: int
     
     # Error tracking
     last_error: Optional[Dict[str, Any]] = None
     error_history: List[Dict[str, Any]] = field(default_factory=list)
-    
-    # Question analysis (cached)
-    question_analysis: Optional[Dict[str, Any]] = None
+    # error_message: error message, error_type: error type
+
+    analysis: Optional[Dict[str, Any]] = None
     
     # Execution results
     successful_results: List[Dict[str, Any]] = field(default_factory=list)
+    # SQLAttempt with success = True
     
     # Metadata
     start_time: datetime = field(default_factory=datetime.now)
 
-    def has_schema(self):
-        return True if self.schema else False
-    
-    def has_examples(self):
-        return True if self.examples else False
+    def add_action(
+            self,
+            action: ActionType,
+            state: AgentState,
+            success: bool,
+            iteration: int
+    ):
+        self.action_history.append({'action': action, 'state': state, 'success': success, 'iteration': iteration})
 
     def add_sql_attempt(
         self,
         sql: str,
-        state: str,
         success: bool = False,
         error: Optional[Dict[str, Any]] = None,
-        result: Optional[Any] = None,
+        result: Optional[str] = None,
         confidence: Optional[float] = None
     ):
         attempt = SQLAttempt(
             sql=sql,
             timestamp=datetime.now(),
-            state=state,
             success=success,
             error=error,
             result=result,
@@ -83,7 +98,17 @@ class AgentMemory:
         if self.sql_attempts:
             return self.sql_attempts[-1].sql
         return None
+       
+    def get_last_action(self) -> Optional[Dict[str, Any]]: # the most recent action
+        if self.action_history:
+            return self.action_history[-1]
+        return None
     
+    def get_last_execution_result(self) -> Optional[str]:
+        if self.sql_attempts:
+            return self.sql_attempts[-1].result
+        return None
+
     def get_failed_attempts(self) -> List[SQLAttempt]: # all failed SQL attempts
         return [attempt for attempt in self.sql_attempts if not attempt.success]
     
@@ -96,27 +121,4 @@ class AgentMemory:
             for err in self.error_history
         ]))
     
-    def to_context_string(self) -> str:
-        """
-        Convert memory to a formatted string for LLM context.
-        Includes only the most relevant information.
-        """
-        context_parts = []
-        
-        # Schema
-        if self.schema:
-            context_parts.append(f"Database Schema:\n{self._format_schema()}")
-        
-        # Examples
-        if self.examples:
-            context_parts.append(f"\nFew-shot Examples:\n{self._format_examples()}")
-        
-        # Previous attempts
-        if self.sql_attempts:
-            context_parts.append(f"\nPrevious SQL Attempts:\n{self._format_attempts()}")
-        
-        # Last error
-        if self.last_error:
-            context_parts.append(f"\nLast Error:\n{self._format_error(self.last_error)}")
-        
-        return "\n".join(context_parts)
+

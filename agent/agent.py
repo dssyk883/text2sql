@@ -72,7 +72,6 @@ class NL2SQLAgent:
         self.worker.db_id = db_id
         self.worker.db_path = db_path
         trace = []
-        iter_count = 0
         
         while True:
             decision = self.decide(self.state, self.memory)

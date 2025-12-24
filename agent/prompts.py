@@ -3,104 +3,101 @@ Prompt Builder
 Generates state specific prompts for the LLM
 """
 
-from typing import Dict, Any, List
-from agent.states import AgentState, ActionType
-from agent.memory import AgentMemory
+from typing import Dict, Optional, List
+from agent2.states import AgentState, ActionType, get_available_actions
+from agent2.memory import AgentMemory, SQLAttempt
+from langchain_core.prompts.prompt import PromptTemplate
+from langchain_core.prompts.chat import ChatPromptTemplate
 
 class PromptBuilder:
+
     ACTION_DESCRIPTIONS = {
-            ActionType.GET_DB_SCHEMA: "Get database tables and columns",
-            ActionType.SEARCH_EXAMPLES: "Find similar query examples",
+            ActionType.FEW_SHOT_SELECT: "Select a few-shot example strategy",
             ActionType.GENERATE_SQL: "Generate SQL query",
-            ActionType.VALIDATE_SYNTAX: "Validate SQL syntax",
-            ActionType.EXECUTE_QUERY: "Execute the query",
-            ActionType.REFINE_QUERY: "Fix errors in the query",
-            ActionType.FINISH: "Task complete",
-            ActionType.ABORT: "Cannot complete task"
+            ActionType.VALIDATE_SQL: "Validate SQL syntax",
+            ActionType.REFINE_SQL: "Refine SQL query",
+            ActionType.EXECUTE_SQL: "Execute the generated SQL query",
+            ActionType.CHECK_SEMANTIC: "Compare the question and SQL query",            
+        }
+    
+    DECISION_INSTRUCTIONS = """
+- Choose exactly ONE next worker
+- For Few-Shot Selector, specify strategy (Random/Intent/Jaccard) and k(1-5)
+- Respond ONLY in valid JSON
+- Do NOT include explanations outside JSON
+"""
+
+    EXAMPLE_DECISION = """
+{"worker": "few_shot_select", "params": {"strategy": "jaccard", "k": 5}, "reasoning": "Question has specific keywords, Jaccard will match terms", "confidence": 0.8},
+{"worker": "generate_sql", "params": {}, "reasoning": "SQL Examples loaded, ready to generate","confidence": 0.9}
+    """
+
+    EXAMPLE_SEMANTIC = """
+{"status": "PASS", "confidence": 0.95, "issues": [], "reasoning": "Correct count query"},
+{"status": "PARTIAL", "confidence": 0.6, "issues": ["Missing inactive departments"], "reasoning": "Question says 'all' but SQL filters active only"},
+{"status": "FAIL", "confidence": 0.9, "issues": ["No GROUP BY", "Missing department info"], "reasoning": "Gives overall average, not per department"}
+"""
+
+    def __init__(self):
+        self._build_templates()
+
+    def _build_templates(self):
+        """Initialize prompt template"""
+        self.templates = {
+            "decision": self._create_decision_template(),
+            "sql_generation": self._create_sql_generation_template(),
+            "semantic_check": self._create_semantic_check_template(),
         }
 
-    def __init__(self, config):
-        self.config = config
+    def _create_decision_template(self) -> PromptTemplate:
+        template = """You are deciding the next action for SQL generation.
+QUESTION: {question}
+DB SCHEMA: {schema_summary}
+FEW-SHOT EXAMPLES: {examples_status}
+STATE: {current_state}
+PROGRESS: {current_checkpoint}
 
-    def build_prompt(
-        self,
-        state: AgentState,
-        memory: AgentMemory
-    ) -> str:
-        if state == AgentState.ANALYZE:
-            return self._build_analyze_prompt(memory)
-        elif state == AgentState.GATHER_INFO:
-            return self._build_gather_info_prompt(memory)
-        elif state == AgentState.GENERATE_SQL:
-            return self._build_generate_sql_prompt(memory)
-        # elif state == AgentState.VALIDATE_SQL:
-        #     return self._build_validate_sql_prompt(memory)
-        elif state == AgentState.REFINE_SQL:
-            return self._build_refine_sql_prompt(memory)
-        else:
-            return ""
+CURRENT SQL: {current_sql}
+LAST RESULT: {execution_result}
+LAST ERROR: {last_error}
+LAST ACTION: {last_action}
 
-    def _build_analyze_prompt(self, memory: AgentMemory) -> str:
-        """Initial quesiton analysis"""
+AVAILABLE ACTIONS:
+{available_actions}
 
-        prompt = f"""You are an NL2SQL agent. Analyze this question and decided what to do next.
+Choose ONE action and respond in JSON:
+{{"action": "<name>", "params": {{}}, "reasoning": "<brief reason>", "confidence": 0.0-1.0}}
 
-User Question: {memory.question}
+Response Examples:
+{example_decision}
 
-Current Status:
-- Schema loaded?: {memory.has_schema()}
-- Examples loaded?: {memory.has_examples()}
+Your choice:"""
 
-Choose ONE Action:
-1. get_db_schema - Get database tables and columns
-2. serach_similar_examples - Find similar query examples
-3. generate_sql - Generate SQL query now
-
-Respond with ONLY the action name (e.g., "get_db_schema")
-"""
-        return prompt.strip()
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "schema_summary",
+                "examples_status",
+                "current_state",
+                "current_checkpoint", 
+                "current_sql",
+                "execution_result",
+                "last_error",                
+                "last_action",
+                "available_actions",
+                "example_decision"
+            ],
+            template=template
+        )
     
-    def _build_gather_info_prompt(self, memory: AgentMemory) -> str:
-        """Gathering additional info"""
-
-        status = []
-
-        status.append("Schema loaded" if memory.schema else "Schema needed")
-        status.append("Examples loaded" if memory.examples else "Examples needed")
-
-        prompt = f"""You are preparing to generate SQL for this question.
-
-Question: {memory.question}
-
-Status: 
-{chr(10).join(status)}
-
-What do you need next?
-1. get_db_schema - Get database structure
-2. search_similar_examples - GEt similar queries
-3. generate_sql - Ready to generate SQL
-
-Respond with ONLY the action name (e.g., "get_db_schema")
-"""
-        return prompt.strip()
-    
-    def _build_generate_sql_prompt(self, memory: AgentMemory) -> str:
-        """Prompt for SQL generation"""
-
-        summary_schema = memory.schema_summary if memory.has_schema() else ""
-
-        formatted_ex = ""
-
-        for i, ex in enumerate(memory.examples, 1):
-            formatted_ex += f"Example {i}:\n"
-            formatted_ex += f"Question: {ex['input']}\n"
-            formatted_ex += f"SQL: {ex['query']}\n"
-
-        prompt = f"""You are a SQLite expert. Learn these natural languages to SQL examples.
+    def _create_sql_generation_template(self) -> PromptTemplate:
+        template ="""You are a SQLite expert. Learn these natural languages to SQL examples.
 Examples:
-{formatted_ex}
+{examples}
+
 Now, given the following information, generate the correct SQL query:
-Schema: {summary_schema}
+Schema:
+{schema_summary}
 
 Critical Rules:
 1. If a table/column is not in the schema above, you CANNOT use it
@@ -108,101 +105,135 @@ Critical Rules:
 3. Do NOT use common sense - use ONLY what's in the schema
 4. Return ONLY the SQL query
 
-Question: {memory.question}
+Question: {question}
 """
-        return prompt.strip()
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "schema_summary",
+                "examples"
+            ],
+            template=template
+        )
     
-#     def _build_validate_sql_prompt(self, memory: AgentMemory) -> str:
-#         """Prompt for SQL validation - not sure if it's used"""
-        
-#         last_sql = memory.get_last_sql()
-        
-#         prompt = f"""Review this SQL query for errors.
+    def _create_semantic_check_template(self) -> PromptTemplate:
+        template = """Check if SQL results answer the question correctly.
+QUESTION: {question}
+SQL: {sql}
+RESULT: {execution_result}
+SCHEMA: {schema_summary}
 
-# Question: {memory.question}
-# Generated SQL: {last_sql}
+Analysis:
+1. Does result structure match question?
+2. Is row count reasonable?
+3. Are values correct type?
 
-# Check for:
-# - Syntax errors
-# - Wrong table/column names
-# - Logic errors
+Respond in JSON:
+{{"status": "PASS|PARTIAL|FAIL", "issues": ["issue1", "issue2"], "reasoning": "brief explanation", "confidence": 0.0-1.0}}
 
-# Is this SQL correct? Reply with:
-# - "valid" if correct
-# - "invalid: [reason]" if there are issues
-# """
-        
-#         return prompt.strip()
-    
-    def _build_refine_sql_prompt(self, memory: AgentMemory) -> str:
-        """Prompt for SQL refinement after error"""
+Response Examples:
+{example_semantic}
 
-        last_attempt = memory.sql_attempts[-1] if memory.sql_attempts else None
-        error = memory.last_error
-
-        prompt_parts = [
-            "The previous SQL query failed. Fix the error and generate a corrected query.",
-            "",
-            f"Question: {memory.question}",
-            "",
-            f"Failed SQL:\n{last_attempt.sql if last_attempt else 'N/A'}",
-            "",
-            f"Error Type: {error.get('error_type', 'unknown') if error else 'unknown'}",
-            f"Error Message: {error.get('error', 'Unknown error') if error else 'Unknown error'}",
-        ]
-        
-        # Add schema for reference
-        if memory.schema_summary:
-            prompt_parts.append("\nCorrect Schema:")
-            prompt_parts.append(memory.schema_summary)
-        
-        # Add error specific hints
-        if error:
-            error_type = error.get('error_type', 'unknown')
-            prompt_parts.append(self._get_error_hint(error_type))
-        
-        prompt_parts.extend([
-            "",
-            "Generate the corrected SQLite query:",
-            "SQL:"
-        ])
-        
-        return "\n".join(prompt_parts)
-    
-    def _get_error_hint(self, error_type: str) -> str:
-        """Get helpful hint based on error type"""
-        hints = {
-            "syntax": "\nHint: Check for missing keywords, commas, or parentheses.",
-            "schema": "\nHint: Verify table and column names match the schema exactly.",
-            "logic": "\nHint: Review aggregate functions and GROUP BY clauses.",
-            "permission": "\nHint: This table may require different access.",
-            "timeout": "\nHint: Simplify the query or add indexes."
-        }
-        return hints.get(error_type, "\nHint: Review the error message carefully.")
-    
-    def build_action_prompt(
-        self, 
-        state: AgentState, 
-        allowed_actions: List[ActionType]
-    ) -> str:
-        """
-        Prompt for action selection
-        
-        :param state: Current state
-        :param allowed_actions: List of allowed actions
-        :return: Formatted prompt for action selection
-        """
-        options = []
-        for i, action in enumerate(allowed_actions, 1):
-            desc = self.ACTION_DESCRIPTIONS.get(action, action.value)
-            options.append(f"{i}. {action.value} - {desc}")
-    
-        prompt = f"""Current state: {state.value}
-
-Choose ONE action:
-{chr(10).join(options)}
-
-Respond with the action name only:
+Your analysis:
 """
+
+        return PromptTemplate(
+            input_variables=[
+                "question",
+                "sql",
+                "execution_result",
+                "schema_summary",
+                "example_semantic",
+            ],
+            template=template
+        )
+
+    def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
+        """Build the complete decision prompt"""
+        sql = memory.get_last_sql()
+        if not memory.examples or len(memory.examples) == 0:
+            examples_status = "No examples loaded"
+        else:
+            examples_status = f"{len(memory.examples)} examples loaded"
+        last_execution_result = memory.get_last_execution_result()
+        last_error = memory.get_last_error()
+        last_action = self._format_action(memory.get_last_action())
+        available_actions = self._format_available_actions(get_available_actions(
+            state=state,
+            memory=memory,
+        ))
+        return self.templates['decision'].format(
+            question=memory.question,
+            schema_summary=memory.schema_summary,
+            examples_status=examples_status,
+            current_state=state.value,
+            current_checkpoint=memory.checkpoint.value,
+            current_sql=sql,
+            execution_result=last_execution_result,
+            last_error=last_error,            
+            last_action=last_action,
+            available_actions=available_actions,
+            example_decision=self.EXAMPLE_DECISION
+        )       
+   
+    def build_generate_sql_prompt(self, memory: AgentMemory) -> str:
+        examples = self._format_examples(memory.examples)
+        return self.templates['sql_generation'].format(
+            question=memory.question,
+            schema_summary=memory.schema_summary,
+            examples=examples
+        )
+    
+    def build_semantic_check_prompt(self, memory: AgentMemory) -> str:
+        result = memory.get_last_execution_result()
+        return self.templates['semantic_check'].format(
+            question=memory.question,
+            sql=memory.sql,
+            execution_result=result,
+            schema_summary=memory.schema_summary,
+            example_semantic=self.EXAMPLE_SEMANTIC
+        )
+    
+    def _format_available_actions(self, actions: List[ActionType]) -> str:
+        formatted = []
+        for i, action in enumerate(actions):
+            description = self.ACTION_DESCRIPTIONS.get(action, "No description")
+            formatted.append(f"{i}. {action.value}: {description}")
         
-        return prompt.strip()
+        return "\n".join(formatted)
+
+    def _format_examples(self, examples: List[Dict[str, str]] = None) -> str:
+        if not examples:
+            return "No examples"
+        formatted = []
+        for ex in examples:
+            formatted.append(f"Question: {ex['input']}\nSQL:{ex['query']}")
+        return '\n'.join(formatted)
+    
+    def _format_attempts(self, attempts: Optional[List[SQLAttempt]] = None) -> str:
+        """
+        Format SQL Attempts for LLM context
+        """
+        if not attempts:
+            return "No previous attempts."
+
+        formatted = []
+        for idx, attempt in enumerate(attempts, 1):
+            status = "Success" if attempt.success else "Failed"
+            parts = [f"Attempt #{idx} [{status}]", f"SQL: {attempt.sql}"]
+            if attempt.error:
+                error_message = attempt.error.get('error_message', 'Unknown error message')
+                error_type = attempt.error.get('error_type', 'Unknown error type')
+                parts.append(f"Error type: {error_type}, Error message: {error_message}")
+            
+            formatted.append("\n".join(parts))
+
+        return "\n\n".join(formatted)
+
+    def _format_action(self, action: Optional[Dict[str, str]]) -> str:
+        """
+        Format last action
+        """
+        if not action:
+            return "No previous actions"
+        return f"State: {action['state'].value}, Action: {action['action'].value} ({'Success' if action['success'] else 'Failed'}), Iteration: {action['iteration']}"
