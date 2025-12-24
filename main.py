@@ -1,4 +1,3 @@
-from fastapi import FastAPI, HTTPException
 from database import DATABASE_URL
 from models import generate_sql
 from pydantic import BaseModel
@@ -6,24 +5,7 @@ from evaluation.benchmark import run_spider_benchmark
 from evaluation.agent_benchmark import run_spider_agent_benchmark
 import argparse
 
-app = FastAPI()
-
-class QueryRequest(BaseModel):
-    question: str
-
-@app.post("/query")
-async def text_to_sql(request: QueryRequest):
-    try:
-        sql, query_result = generate_sql(request.question, DATABASE_URL)
-        return {
-            "question": request.question,
-            "sql": sql,
-            "result": query_result
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='NL2SQL Few-Shot Benchmark')
     parser.add_argument('-m', '--mode', choices=['benchmark', 'app', 'agent'],
                         default='benchmark', help='Execution mode')
@@ -51,6 +33,5 @@ if __name__ == "__main__":
     if args.mode == 'agent':
         run_spider_agent_benchmark(args)
 
-    if args.mode == 'app':
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == "__main__":
+    main()
