@@ -111,7 +111,8 @@ Question: {question}
                 "question",
                 "schema_summary",
                 "examples"
-            ]
+            ],
+            template=template
         )
     
     def _create_semantic_check_template(self) -> PromptTemplate:
@@ -142,7 +143,8 @@ Your analysis:
                 "execution_result",
                 "schema_summary",
                 "example_semantic",
-            ]
+            ],
+            template=template
         )
 
     def build_decision_prompt(self, state: AgentState, memory:AgentMemory) -> str:
@@ -178,18 +180,13 @@ Your analysis:
     
     def build_schema_check_prompt(self, memory: AgentMemory) -> str:
         result = memory.get_last_execution_result()
-        formatted_reulst = self._format_result(result)
         return self.templates['semantic_check'].format(
             question=memory.question,
             sql=memory.sql,
-            execution_result=formatted_reulst,
+            execution_result=result,
             schema_summary=memory.schema_summary,
             example_semantic=self.EXAMPLE_SEMANTIC
         )
-
-    def _format_result(self, result) -> str:
-        pass
-        return ""
     
     def _format_workers(self, actions: List[ActionType]) -> str:
         formatted = []
