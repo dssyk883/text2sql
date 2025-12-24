@@ -166,28 +166,15 @@ Your analysis:
             last_action=last_action,
             available_actions=available_actions,
             example_decision=self.EXAMPLE_DECISION
-        )
-
-        
+        )       
    
     def build_generate_sql_prompt(self, memory: AgentMemory) -> str:
         examples = self._format_examples(memory.examples)
-        return f"""You are a SQLite expert. Learn these natural languages to SQL examples.
-Examples:
-{examples}
-
-Now, given the following information, generate the correct SQL query:
-Schema:
-{memory.schema_summary}
-
-Critical Rules:
-1. If a table/column is not in the schema above, you CANNOT use it
-2. Check spelling carefully (case-sensitive)
-3. Do NOT use common sense - use ONLY what's in the schema
-4. Return ONLY the SQL query
-
-Question: {memory.question}
-"""
+        return self.templates['sql_generation'].format(
+            question=memory.question,
+            schema_summary=memory.schema_summary,
+            examples=examples
+        )
     
     def _format_workers(self, actions: List[ActionType]) -> str:
         formatted = []
